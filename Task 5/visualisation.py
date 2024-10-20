@@ -4,35 +4,37 @@ from scipy.ndimage import gaussian_filter1d
 import numpy as np
 
 
-def plot_prediction(actual_prices, predicted_prices, ticker='Stock', smooth=False, sigma=2):
+def plot_prediction(actual_prices, predicted_prices, ticker, smooth=False, sigma=2):
     """
-    Plots the actual and predicted stock prices for multistep predictions.
-
-    Parameters:
-    - actual_prices (np.ndarray): Actual stock prices (samples, future_steps).
-    - predicted_prices (np.ndarray): Predicted stock prices (samples, future_steps).
-    - ticker (str): The stock ticker symbol used in the plot title.
-    - smooth (bool): Whether to apply smoothing to the predicted prices for better visualization.
-    - sigma (int): The sigma value for Gaussian smoothing.
-
-    Returns:
-    - None
+    Plots the actual vs predicted stock prices.
+    Args:
+        actual_prices: Array of actual stock prices.
+        predicted_prices: Array of predicted stock prices.
+        ticker: Ticker symbol for the company.
+        smooth: Whether to apply Gaussian smoothing.
+        sigma: Smoothing factor for Gaussian smoothing.
     """
-    # Flatten the arrays for plotting
-    actual_prices_flat = actual_prices.flatten()
-    predicted_prices_flat = predicted_prices.flatten()
+    # Flatten arrays if they have multiple dimensions
+    if len(actual_prices.shape) > 1:
+        actual_prices = actual_prices.flatten()
+    if len(predicted_prices.shape) > 1:
+        predicted_prices = predicted_prices.flatten()
 
+    # Apply smoothing if needed
     if smooth:
-        predicted_prices_flat = gaussian_filter1d(predicted_prices_flat, sigma=sigma)
+        from scipy.ndimage import gaussian_filter1d
+        actual_prices = gaussian_filter1d(actual_prices, sigma=sigma)
+        predicted_prices = gaussian_filter1d(predicted_prices, sigma=sigma)
 
+    # Plot the actual and predicted prices
     plt.figure(figsize=(10, 6))
-    plt.plot(actual_prices_flat, color='black', linewidth=1.5, label=f'Actual {ticker} Price')
-    plt.plot(predicted_prices_flat, color='green', linestyle='--', linewidth=2, label=f'Predicted {ticker} Price')
+    plt.plot(actual_prices, label=f'Actual {ticker} Price', color='black', linewidth=1)
+    plt.plot(predicted_prices, label=f'Predicted {ticker} Price', linestyle='--', color='green', linewidth=2)
     plt.title(f'{ticker} Share Price Prediction')
     plt.xlabel('Time Steps')
     plt.ylabel(f'{ticker} Share Price')
-    plt.grid(True, linestyle='--', alpha=0.6)
     plt.legend()
+    plt.grid(True)
     plt.tight_layout()
     plt.show()
 

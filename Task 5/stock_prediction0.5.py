@@ -1,5 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.preprocessing import MinMaxScaler
@@ -43,12 +45,6 @@ FUTURE_STEPS = 3  # Number of future days to predict
 X_train_reshaped, y_train_reshaped = prepare_multistep_data(X_train, y_train, PREDICTION_DAYS, FUTURE_STEPS)
 X_test_reshaped, y_test_reshaped = prepare_multistep_data(X_test, y_test, PREDICTION_DAYS, FUTURE_STEPS)
 
-# Display reshaped data shapes
-print("Reshaped X_train shape:", X_train_reshaped.shape)
-print("Reshaped y_train shape:", y_train_reshaped.shape)
-print("Reshaped X_test shape:", X_test_reshaped.shape)
-print("Reshaped y_test shape:", y_test_reshaped.shape)
-
 # Scaling functions
 def scale_X(X_train, X_test):
     n_samples_train, timesteps, n_features = X_train.shape
@@ -74,86 +70,83 @@ def scale_y(y_train, y_test):
 X_train_scaled, X_test_scaled, X_scaler = scale_X(X_train_reshaped, X_test_reshaped)
 y_train_scaled, y_test_scaled, y_scaler = scale_y(y_train_reshaped, y_test_reshaped)
 
-# Build the model using the function
-input_shape = (PREDICTION_DAYS, X_train_scaled.shape[2])
-layer_types = ['LSTM', 'GRU', 'Dense']
-layer_sizes = [150, 100, 50]
-dropout_rates = [0.3, 0.3, 0.2]
-output_size = FUTURE_STEPS
-return_sequences = [True, False, False]
-activation_functions = ['tanh', 'tanh', 'relu']
+# Define the multivariate prediction function
+def multivariate_prediction(k_days: int, company: str, train_start: str, train_end: str, prediction_days: int,
+                            n_features: int = 6, test_ratio: float = 0.15, multivariate: bool = True):
+    """
+    Multivariate prediction using multiple features.
+    """
+    # Load and process data
+    X_train, X_test, y_train, y_test, _, df = load_and_process_data_with_gap(
+        ticker=company,
+        start_date=train_start,
+        end_date=train_end,
+        handle_nan='drop',
+        split_method='date',
+        test_ratio=test_ratio,
+        scale_data=False,
+        save_local=True,
+        load_local=True,
+        local_dir='stock_data',
+        feature_columns=None,
+        target_column='Close'
+    )
 
-model = create_dl_model(
-    input_shape=input_shape,
-    layer_types=layer_types,
-    layer_sizes=layer_sizes,
-    dropout_rates=dropout_rates,
-    output_size=output_size,
-    loss_function='huber',
-    optimizer='adam',
-    return_sequences=return_sequences,
-    activation_functions=activation_functions
+    # Prepare data for multistep prediction
+    X_train_reshaped, y_train_reshaped = prepare_multistep_data(X_train, y_train, prediction_days, k_days)
+    X_test_reshaped, y_test_reshaped = prepare_multistep_data(X_test, y_test, prediction_days, k_days)
+
+    # Scale the data
+    X_train_scaled, X_test_scaled, X_scaler = scale_X(X_train_reshaped, X_test_reshaped)
+    y_train_scaled, y_test_scaled, y_scaler = scale_y(y_train_reshaped, y_test_reshaped)
+
+    # Define the model
+    model = Sequential()
+    model.add(LSTM(150, input_shape=(prediction_days, n_features), return_sequences=False, activation='tanh'))
+    model.add(Dropout(0.3))
+    model.add(Dense(100, activation='relu'))
+    model.add(Dropout(0.2))
+    model.add(Dense(k_days, activation='linear'))
+
+    model.compile(loss='huber', optimizer='adam')
+
+    # Train the model
+    early_stopping = EarlyStopping(monitor='val_loss', patience=7, restore_best_weights=True)
+    model.fit(
+        X_train_scaled, y_train_scaled,
+        epochs=100, batch_size=32, verbose=1,
+        validation_split=0.2, callbacks=[early_stopping]
+    )
+
+    # Predict on the test set
+    predicted_prices = model.predict(X_test_scaled)
+    predicted_prices_inv = y_scaler.inverse_transform(predicted_prices.reshape(-1, 1)).reshape(-1, k_days)
+    actual_prices_inv = y_scaler.inverse_transform(y_test_scaled.reshape(-1, 1)).reshape(-1, k_days)
+
+    # Calculate performance metrics
+    mae = mean_absolute_error(actual_prices_inv.flatten(), predicted_prices_inv.flatten())
+    mse = mean_squared_error(actual_prices_inv.flatten(), predicted_prices_inv.flatten())
+    rmse = np.sqrt(mse)
+
+    print(f"Mean Absolute Error (MAE): {mae}")
+    print(f"Mean Squared Error (MSE): {mse}")
+    print(f"Root Mean Squared Error (RMSE): {rmse}")
+
+    return predicted_prices_inv, actual_prices_inv, model
+
+# Example usage of multivariate prediction
+k_days = 5  # Number of future days to predict
+predictions, actual, model = multivariate_prediction(
+    k_days=k_days,
+    company=COMPANY,
+    train_start=TRAIN_START,
+    train_end=TRAIN_END,
+    prediction_days=PREDICTION_DAYS
 )
-model.summary()
 
-# Train the Model
-early_stopping = EarlyStopping(monitor='val_loss', patience=7, restore_best_weights=True)
-checkpoint = ModelCheckpoint('best_model.h5', save_best_only=True, monitor='val_loss')
-
-history = model.fit(
-    X_train_scaled, y_train_scaled,
-    epochs=100, batch_size=32, verbose=1,
-    validation_split=0.2, callbacks=[early_stopping, checkpoint]
-)
-
-# Plot training and validation loss
-plt.plot(history.history['loss'], label='Training Loss')
-plt.plot(history.history['val_loss'], label='Validation Loss')
-plt.title('Model Loss')
-plt.xlabel('Epoch')
-plt.ylabel('Loss')
-plt.legend()
-plt.show()
-
-# Test the Model Accuracy on Existing Data
-model.load_weights('best_model.h5')
-
-# Predict prices using the test set
-predicted_prices = model.predict(X_test_scaled)
-
-# Reshape to (-1, 1) for inverse transform
-predicted_prices_flat = predicted_prices.reshape(-1, 1)
-actual_prices_flat = y_test_scaled.reshape(-1, 1)
-
-# Inverse transform
-predicted_prices_inv = y_scaler.inverse_transform(predicted_prices_flat).reshape(-1, FUTURE_STEPS)
-actual_prices_inv = y_scaler.inverse_transform(actual_prices_flat).reshape(-1, FUTURE_STEPS)
-
-# Flatten for evaluation
-predicted_prices_flat = predicted_prices_inv.flatten()
-actual_prices_flat = actual_prices_inv.flatten()
-
-# Evaluate Model Performance
-mae = mean_absolute_error(actual_prices_flat, predicted_prices_flat)
-mse = mean_squared_error(actual_prices_flat, predicted_prices_flat)
-rmse = np.sqrt(mse)
-
-print(f"Mean Absolute Error (MAE): {mae}")
-print(f"Mean Squared Error (MSE): {mse}")
-print(f"Root Mean Squared Error (RMSE): {rmse}")
+# Display predictions vs actual
+print(f"Predictions for the next {k_days} days: {predictions}")
+print(f"Actual closing prices: {actual}")
 
 # Plot the Test Predictions
-plot_prediction(actual_prices_inv, predicted_prices_inv, ticker=COMPANY, smooth=True, sigma=2)
-
-# Predict Next Sequence of Days
-feature_columns = df.columns.tolist()
-# Adjust if you excluded the target column from features in load_and_process_data_with_gap
-# feature_columns.remove('Close')
-
-last_sequence = df[feature_columns].values[-PREDICTION_DAYS:]
-last_sequence_scaled = X_scaler.transform(last_sequence).reshape(1, PREDICTION_DAYS, -1)
-
-next_days_prediction = model.predict(last_sequence_scaled)
-next_days_prediction = y_scaler.inverse_transform(next_days_prediction).flatten()
-
-print(f"Next {FUTURE_STEPS} Days Prediction: {next_days_prediction}")
+plot_prediction(actual, predictions, ticker=COMPANY, smooth=True, sigma=2)

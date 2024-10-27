@@ -13,6 +13,6 @@
   
   3. Copy and paste stockpredictionFINAL, visualisations, data_processing in project directory.<br>
   
-  4. Run stockpredictionFinal. (Read code documentation to adjust stock ticker, training parameters, model parameters, etc.<br>
+  4. Run stockpredictionFinal. (Read code documentation to adjust stock ticker, training parameters, model parameters, etc.)<br>
   
 <b>Refer to the project <a href = "https://github.com/MuhammadAli-byte/COS30018-103960437/wiki/Home-Page">wiki</a> for progress and documentation.</b> 
